@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 #define PACKET_MAX_SIZE 1024
-#define DATA_MAX_SIZE   (PACKET_MAX_SIZE - 10)
+#define DATA_MAX_SIZE   (PACKET_MAX_SIZE - 10) // BUFFER_LEN
 
 #ifdef SENDER
 #define TARGET_PORT 5555
@@ -17,23 +17,33 @@
 #define LOCAL_PORT 5555
 #endif // RECEIVER
 
-#define MAX_PACKET_SIZE 1024
-#define BUFFERS_LEN 1000 // 512
-#define MAX_SEGMENTS 4096*32
-#define MAX_FILE_NAMES 256 // it is not length of file
-#define MAX_FILE_NAME_LENGTH 256
+typedef enum {
+    MSG_ACK,
+    MSG_DATA,
+    MSG_HASH,
+    MSG_NUM,
 
-#define MAX_RETRIES 0
-#define RETRY_TIMEOUT_MS 1000  //ish timeout between retries
+} MessageType;
 
-
-
-// Jednoduchý datový paket pro Stop-and-Wait
 typedef struct {
+    MessageType type;      // typ zprávy
     uint32_t seq;        // číslo paketu
     uint32_t crc32;      // CRC celého data pole
+
     uint16_t data_len;   // délka dat
     uint8_t  data[DATA_MAX_SIZE];
 } DataPacket;
+
+typedef struct {
+    MessageType type;      // typ zprávy
+    uint32_t crc32;      // CRC celého data pole
+} HashPacket;
+
+
+typedef struct {
+    MessageType type;      // typ zprávy
+    uint32_t seq;        // číslo paketu
+    uint32_t crc32;      // CRC celého data pole
+} AckPacket;
 
 #endif
