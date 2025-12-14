@@ -8,13 +8,13 @@
 #define DATA_MAX_SIZE   (PACKET_MAX_SIZE - 10) // BUFFER_LEN
 
 #ifdef SENDER
-#define TARGET_PORT 5555
-#define LOCAL_PORT 7777
+#define TARGET_PORT 14000
+#define LOCAL_PORT 15001
 #endif // SENDER
 
 #ifdef RECEIVER // Client
-#define TARGET_PORT 7776
-#define LOCAL_PORT 5556
+#define TARGET_PORT 14001
+#define LOCAL_PORT 15000
 #endif // RECEIVER
 
 typedef enum {
