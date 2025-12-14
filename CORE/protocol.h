@@ -25,25 +25,40 @@ typedef enum {
 
 } MessageType;
 
+typedef enum {
+    VALIDITY_OK = 1,
+    VALIDITY_ERROR = 0,
+    
+} ValidityType;
+
+
 typedef struct {
     MessageType type;      // typ zprávy
     uint32_t seq;        // číslo paketu
-    uint32_t crc32;      // CRC celého data pole
 
     uint16_t data_len;   // délka dat
     uint8_t  data[DATA_MAX_SIZE];
+
+    uint32_t crc32;      // CRC celého data pole
 } DataPacket;
 
 typedef struct {
     MessageType type;      // typ zprávy
+
+    uint8_t  hash[32];   // SHA256 hash
+
     uint32_t crc32;      // CRC celého data pole
 } HashPacket;
 
-
 typedef struct {
     MessageType type;      // typ zprávy
+
     uint32_t seq;        // číslo paketu
+
+    uint8_t valid;     // 1 = OK, 0 = chyba
+
     uint32_t crc32;      // CRC celého data pole
+
 } AckPacket;
 
 #endif

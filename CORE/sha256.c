@@ -19,3 +19,14 @@ void sha256_of_file(const char *filename, uint8_t out[32])
     SHA256_Final(out, &ctx);
     fclose(f);
 }
+
+uint8_t sha256_verify(const uint8_t *data, size_t len, uint8_t compare[32])
+{
+    uint8_t sha[32];
+    SHA256_CTX ctx;
+    SHA256_Init(&ctx);
+    SHA256_Update(&ctx, data, len);
+    SHA256_Final(sha, &ctx);
+
+    return (memcmp(sha, compare, 32) == 0);
+}
