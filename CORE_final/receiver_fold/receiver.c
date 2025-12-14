@@ -17,6 +17,8 @@ void send_ack(int sock, struct sockaddr_in *target, uint32_t seq) {
     ack.seq = seq;
     ack.crc32 = 0; // Opraveno jméno položky struktury
 
+    target->sin_port = htons(TARGET_PORT); // adjust port
+    
     sendto(sock, &ack, sizeof(ack), 0, (struct sockaddr*)target, sizeof(*target));
 }
 
