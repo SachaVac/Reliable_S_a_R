@@ -29,6 +29,9 @@ int send_packet_reliably(int sock, struct sockaddr_in *dest_addr, DataPacket *pc
         sendto(sock, pckt, sizeof(DataPacket), 0, (struct sockaddr*)dest_addr, sizeof(*dest_addr));
 
         // Čekání na odpověď
+
+        from_addr.sin_port = htons(LOCAL_PORT);
+
         int r = recvfrom(sock, &ack, sizeof(ack), 0, (struct sockaddr*)&from_addr, &from_len);
 
         if (r < 0) {
