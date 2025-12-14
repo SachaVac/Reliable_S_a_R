@@ -1,14 +1,22 @@
 // sender.c
+
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
 #include <arpa/inet.h>
+#include <sys/time>
+#include <errno.h>
+
 #include "protocol.h"
 #include "crc32.h"
 #include "sha256.h"
 
 #define PORT 5000
+
+
+int send(int data_socket, int ack_socket, )
 
 int main(int argc, char *argv[])
 {
