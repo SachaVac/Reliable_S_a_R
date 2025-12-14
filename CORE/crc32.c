@@ -34,6 +34,5 @@ uint8_t crc32_verify(const uint8_t *data, size_t len)
 
     uint32_t computed_crc = crc32_compute(data, data_len);
 
-    return (computed_crc == *(uint32_t *)(data + data_len));}
-
-
+    return (computed_crc == *(uint32_t *)(data + data_len*sizeof(uint32_t))); 
+}

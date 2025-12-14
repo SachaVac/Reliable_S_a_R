@@ -1,5 +1,9 @@
 #include "handler.h"
 
+void fill_ACKPacket(uint32_t seq, AckPacket* out);
+uint8_t handle_ACKPacket(AckPacket* in, uint32_t *seq);
+
+
 void getPacketType(const void* msg, MessageType* outType)
 {
     if (!outType) return; // if null
@@ -34,20 +38,26 @@ void getPacketSize(const MessageType type, const void* msg, uint32_t* outSize)
     *outSize = size;
 }
 
-void fill_ACKPacket(uint32_t seq, AckPacket* out)
+void fill_ACKPacket(uint32_t seq, AckPacket* out, ValidityType validity)
 {
     out->type  = MSG_ACK;
     out->seq   = seq;
+    out->valid = validity;
     out->crc32 = 0; // important to set to 0 before computing CRC
     out->crc32 = crc32_compute((uint8_t*)out, sizeof(AckPacket) - sizeof(uint32_t));
 }
 
-void handle_ACKPacket(const AckPacket* in, DataPacket* out)
+uint8_t handle_ACKPacket(AckPacket* in, uint32_t *seq)
 {
-    out->type  = MSG_DATA;
-    out->seq   = in->seq;
-    out->crc32 = in->crc32;
-    out->data_len = 0;
+    *seq = in->seq;
+    if (in->valid == VALIDITY_OK)
+        return 1;
+    else if (in->valid == VALIDITY_ERROR)
+    {
+        return 0;
+    }
+
+    return 0; // unknown validity
 }
 
 void fill_HashPacket(const HashPacket* in, AckPacket* out)
@@ -57,9 +67,8 @@ void fill_HashPacket(const HashPacket* in, AckPacket* out)
     out->crc32 = in->crc32;
 }
 
-void handle_HashPacket(const AckPacket* in, HashPacket* out)
+void handle_HashPacket(const AckPacket* in)
 {
-    out->type  = MSG_HASH;
     out->crc32 = in->crc32;
 }
 
@@ -71,7 +80,7 @@ void fill_DataPacket(const AckPacket* in, DataPacket* out)
     out->
 }
 
-void handle_DataPacket(const DataPacket* in, AckPacket* out)
+void handle_DataPacket(const DataPacket* in)
 {
     out->type  = MSG_ACK;
     out->seq   = in->seq;
@@ -79,7 +88,7 @@ void handle_DataPacket(const DataPacket* in, AckPacket* out)
 }
 
 
-void handle_message(
+uint8_t handle_message(
     const uint8_t *message_in,
     size_t len,
     uint8_t *message_out,
@@ -91,7 +100,7 @@ void handle_message(
     getPacketType(message_in, &type);
     getPacketSize(type, message_in, (uint32_t*)&size);
 
-    verify_crc32(message_in, len, size);
+    uint8_t val = verify_crc32(message_in, len, size); // if CRC is valid -> val == 1
 
     switch (type) {
     
@@ -99,9 +108,12 @@ void handle_message(
         const DataPacket *in = (const DataPacket *)message_in;
         AckPacket *out = (AckPacket *)message_out;
 
-        out->type  = MSG_ACK;
-        out->seq   = in->seq;
-        out->crc32 = in->crc32;
+        handle_DataPacket(in);
+
+        if (val == 1)
+            fill_ACKPacket(in->seq, out, VALIDITY_OK);
+        else
+            fill_ACKPacket(in->seq, out, VALIDITY_ERROR);
 
         *out_len = sizeof(AckPacket);
         break;
@@ -111,15 +123,20 @@ void handle_message(
         const HashPacket *in = (const HashPacket *)message_in;
         AckPacket *out = (AckPacket *)message_out;
 
-        out->type  = MSG_ACK;
-        out->seq   = 0;
-        out->crc32 = in->crc32;
+        handle_HashPacket(in);
+
+        if (val == 1)
+            fill_ACKPacket(0, out, VALIDITY_OK);
+        else
+            fill_ACKPacket(0, out, VALIDITY_ERROR);
 
         *out_len = sizeof(AckPacket);
         break;
     }
 
     case MSG_ACK:
+        handle_ACKPacket((AckPacket *)message_in, NULL); // TODO
+
     default:
         *out_len = 0; // nothing to send
         break;
