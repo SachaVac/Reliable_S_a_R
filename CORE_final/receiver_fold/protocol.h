@@ -13,8 +13,8 @@
 #endif // SENDER
 
 #ifdef RECEIVER // Client
-#define TARGET_PORT 7777
-#define LOCAL_PORT 5555
+#define TARGET_PORT 7776
+#define LOCAL_PORT 5556
 #endif // RECEIVER
 
 typedef enum {
