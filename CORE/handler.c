@@ -1,8 +1,26 @@
 #include "handler.h"
 
-void fill_ACKPacket(uint32_t seq, AckPacket* out);
+FILE *f = NULL;
+
+void fill_ACKPacket(uint32_t seq, AckPacket* out, ValidityType validity);
 uint8_t handle_ACKPacket(AckPacket* in, uint32_t *seq);
 
+
+void open_file_read(const char* filename) // important to run before startof sender
+{
+    f = fopen(filename, "rb");
+    if (!f) {
+        perror("File open error");
+    }
+}
+
+void open_file_write(const char* filename) // important to run before startof receiver
+{
+    f = fopen(filename, "wb");
+    if (!f) {
+        perror("File open error");
+    }
+}
 
 void getPacketType(const void* msg, MessageType* outType)
 {
@@ -60,11 +78,12 @@ uint8_t handle_ACKPacket(AckPacket* in, uint32_t *seq)
     return 0; // unknown validity
 }
 
-void fill_HashPacket(const HashPacket* in, AckPacket* out)
+void fill_HashPacket(const HashPacket* out, const char* filename)
 {
     out->type  = MSG_HASH;
-    out->seq   = 0;
-    out->crc32 = in->crc32;
+    sha256_of_file(filename, out->hash);
+    out->crc32 = 0; // important to set to 0 before computing CRC
+    out->crc32 = crc32_compute((uint8_t*)out, sizeof(HashPacket) - sizeof(uint32_t));
 }
 
 void handle_HashPacket(const AckPacket* in)
@@ -72,12 +91,18 @@ void handle_HashPacket(const AckPacket* in)
     out->crc32 = in->crc32;
 }
 
-void fill_DataPacket(const AckPacket* in, DataPacket* out)
+void fill_DataPacket(const DataPacket* out, FILE *f, uint32_t seq)
 {
     out->type  = MSG_DATA;
-    out->seq   = in->seq;
-    out->crc32 = in->crc32;
-    out->
+    out->seq   = seq;
+
+    size_t n = fread(out->data, 1, DATA_MAX_SIZE, f);
+    if (n == 0) return 0; // EOF
+
+    out->data_len = n;
+    
+    out->crc32 = 0; // important to set to 0 before computing CRC
+    out->crc32 = crc32_compute((uint8_t*)out, sizeof(DataPacket) - sizeof(uint32_t));
 }
 
 void handle_DataPacket(const DataPacket* in)
@@ -136,6 +161,8 @@ uint8_t handle_message(
 
     case MSG_ACK:
         handle_ACKPacket((AckPacket *)message_in, NULL); // TODO
+
+
 
     default:
         *out_len = 0; // nothing to send
