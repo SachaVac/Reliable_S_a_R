@@ -1,0 +1,1 @@
+# 2025/26 Semestral project for subject KDS - Comunication and distributed systems
