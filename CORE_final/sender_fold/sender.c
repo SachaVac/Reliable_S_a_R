@@ -1,6 +1,4 @@
 // sender.c
-#define SENDER
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -10,12 +8,12 @@
 #include <errno.h>
 
 #include "protocol.h"
-#include "crc32.h"  // Musíte mít tento soubor (.h a .c)
-#include "sha256.h" // Musíte mít tento soubor (.h a .c)
+#include "crc32.h"
+#include "sha256.h"
 
 #define TIMEOUT_MS 200
 
-// Funkce pro spolehlivé odeslání
+// Function for reliable sending (No changes needed here)
 int send_packet_reliably(int sock, struct sockaddr_in *dest_addr, DataPacket *pckt) {
     pckt->crc32 = crc32_compute(pckt->data, pckt->data_len);
 
@@ -25,13 +23,14 @@ int send_packet_reliably(int sock, struct sockaddr_in *dest_addr, DataPacket *pc
     AckPacket ack;
 
     while (1) {
-        // Odeslání
-        sendto(sock, pckt, sizeof(DataPacket), 0, (struct sockaddr*)dest_addr, sizeof(*dest_addr));
+        // 1. Send (Source port is determined by the socket bind in main)
+        ssize_t sent = sendto(sock, pckt, sizeof(DataPacket), 0, (struct sockaddr*)dest_addr, sizeof(*dest_addr));
+        if (sent < 0) {
+            perror("Sendto failed");
+            return 0;
+        }
 
-        // Čekání na odpověď
-
-        from_addr.sin_port = htons(LOCAL_PORT);
-
+        // 2. Receive on the SAME socket
         int r = recvfrom(sock, &ack, sizeof(ack), 0, (struct sockaddr*)&from_addr, &from_len);
 
         if (r < 0) {
@@ -41,14 +40,14 @@ int send_packet_reliably(int sock, struct sockaddr_in *dest_addr, DataPacket *pc
                 continue; 
             } else {
                 perror("Socket error");
-                return 0; // Kritická chyba
+                return 0; 
             }
         }
 
         if (r == sizeof(AckPacket)) {
-            // POZOR: Musí být == (porovnání), ne = (přiřazení)
+            // Check if it's the correct ACK
             if (ack.type == MSG_ACK && ack.seq == pckt->seq) {
-                return 1; // Úspěch
+                return 1; // Success
             }
         }
     }
@@ -56,29 +55,50 @@ int send_packet_reliably(int sock, struct sockaddr_in *dest_addr, DataPacket *pc
 
 int main(int argc, char *argv[])
 {
-    if (argc != 3) {
-        printf("Usage: %s <IP> <file>\n", argv[0]);
+    // UPDATED ARGUMENT CHECK
+    if (argc != 5) {
+        printf("Usage: %s <Target_IP> <Target_Port> <Local_Port> <File>\n", argv[0]);
+        printf("Example: %s 127.0.0.1 15000 60490 test.bin\n", argv[0]);
         return 1;
     }
 
     const char *ip = argv[1];
-    const char *filename = argv[2];
+    int target_port = atoi(argv[2]); // Parse Target Port
+    int local_port = atoi(argv[3]);  // Parse Local Port
+    const char *filename = argv[4];
 
-    // UDP socket
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0) { perror("Socket creation failed"); return 1; }
-
-    struct sockaddr_in local_addr;
-    memset(&local_addr, 0, sizeof(local_addr));
-    local_addr.sin_family = AF_INET;
-    local_addr.sin_port = htons(LOCAL_PORT);
-    local_addr.sin_addr.s_addr = INADDR_ANY; // Opraveno .s_addr
-
-    if (bind(sock, (struct sockaddr*)&local_addr, sizeof(local_addr)) < 0) {
-        perror("Bind failed");
+    if (target_port <= 0 || local_port <= 0) {
+        printf("Error: Ports must be positive integers.\n");
         return 1;
     }
 
+    // 1. Create Socket
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) { perror("Socket creation failed"); return 1; }
+
+    // Allow re-binding immediately
+    int reuse = 1;
+    if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
+        perror("setsockopt failed");
+    }
+
+    // 2. BIND to the specific LOCAL PORT
+    // This forces the Source Port of outgoing packets to be 'local_port'
+    // And listens on 'local_port' for replies.
+    struct sockaddr_in local_addr;
+    memset(&local_addr, 0, sizeof(local_addr));
+    local_addr.sin_family = AF_INET;
+    local_addr.sin_port = htons(local_port); 
+    local_addr.sin_addr.s_addr = INADDR_ANY;
+
+    if (bind(sock, (struct sockaddr*)&local_addr, sizeof(local_addr)) < 0) {
+        perror("Bind failed (Port likely in use)");
+        return 1;
+    }
+
+    printf("Socket bound. sending FROM port %d \n", local_port);
+
+    // 3. Set Timeout
     struct timeval tv;
     tv.tv_sec = 0;
     tv.tv_usec = TIMEOUT_MS * 1000;
@@ -86,29 +106,30 @@ int main(int argc, char *argv[])
         perror("Setsockopt failed");
     }
 
+    // 4. Define Target Address
     struct sockaddr_in dest_addr;
     memset(&dest_addr, 0, sizeof(dest_addr));
     dest_addr.sin_family = AF_INET;
-    dest_addr.sin_port = htons(TARGET_PORT);
+    dest_addr.sin_port = htons(target_port);
     inet_pton(AF_INET, ip, &dest_addr.sin_addr);
 
+    // --- FILE HANDLING ---
     FILE *f = fopen(filename, "rb");
     if (!f) { perror("File not open"); return 1; }
 
-    // Výpočet Hash
     uint8_t file_hash[32];
-    sha256_of_file(filename, file_hash); // Předpokládám existenci této funkce
+    sha256_of_file(filename, file_hash); 
 
     fseek(f, 0, SEEK_END);
     long filesize = ftell(f);
     rewind(f);
 
-    printf("Sending %s (%ld bytes) to %s:%d\n", filename, filesize, ip, TARGET_PORT);
+    printf("Sending %s (%ld bytes) TO %s:%d\n", filename, filesize, ip, target_port);
 
     DataPacket pckt;
     uint32_t cntr = 0;
 
-    // 1. Metadata
+    // Send Metadata
     pckt.type = MSG_DATA;
     pckt.seq = cntr;
     snprintf((char*)pckt.data, DATA_MAX_SIZE, "FILENAME=%s;SIZE=%ld", filename, filesize);
@@ -117,7 +138,7 @@ int main(int argc, char *argv[])
     send_packet_reliably(sock, &dest_addr, &pckt);
     cntr++;
 
-    // 2. Data souboru
+    // Send File Data
     size_t bytes_sz;
     while ((bytes_sz = fread(pckt.data, 1, DATA_MAX_SIZE, f)) > 0) {
         pckt.type = MSG_DATA;
@@ -132,7 +153,7 @@ int main(int argc, char *argv[])
     }
     printf("\n");
 
-    // 3. Hash na konci
+    // Send Hash
     pckt.type = MSG_HASH;
     pckt.seq = cntr;
     memcpy(pckt.data, file_hash, 32);

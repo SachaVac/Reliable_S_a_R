@@ -8,12 +8,12 @@
 #define DATA_MAX_SIZE   (PACKET_MAX_SIZE - 10) // BUFFER_LEN
 
 #ifdef SENDER
-#define TARGET_PORT 14000//15000//
-#define LOCAL_PORT 15001//14001//
+#define TARGET_PORT 15000//
+#define LOCAL_PORT 14000//
 #endif // SENDER
 
 #ifdef RECEIVER // Client
-#define TARGET_PORT 14001
+#define TARGET_PORT 14000
 #define LOCAL_PORT 15000
 #endif // RECEIVER
 
