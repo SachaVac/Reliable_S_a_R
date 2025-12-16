@@ -53,6 +53,74 @@ int send_packet_reliably(int sock, struct sockaddr_in *dest_addr, DataPacket *pc
     }
 }
 
+int send_window_reliably(
+    int sock,
+    struct sockaddr_in *dest,
+    DataPacket *packets,
+    int packet_count,
+    int window_size
+) 
+{
+    int base = 0;
+    int next = 0;
+
+    typedef struct {
+        int acked;
+        struct timeval sent;
+    } Slot;
+
+    Slot slots[packet_count];
+    memset(slots, 0, sizeof(slots));
+
+    struct sockaddr_in from;
+    socklen_t fromlen = sizeof(from);
+    AckPacket ack;
+
+    while (base < packet_count) {
+
+        /* send new packets */
+        while (next < base + window_size && next < packet_count) {
+            sendto(sock, &packets[next], sizeof(DataPacket), 0,
+                   (struct sockaddr*)dest, sizeof(*dest));
+            gettimeofday(&slots[next].sent, NULL);
+            next++;
+        }
+
+        /* wait for ACK */
+        int r = recvfrom(sock, &ack, sizeof(ack), 0,
+                         (struct sockaddr*)&from, &fromlen);
+
+        if (r == sizeof(AckPacket) && ack.type == MSG_ACK) {
+            int s = ack.seq;
+            if (s >= 0 && s < packet_count)
+                slots[s].acked = 1;
+
+            while (base < packet_count && slots[base].acked)
+                base++;
+        }
+
+        /* retransmit on timeout */
+        struct timeval now;
+        gettimeofday(&now, NULL);
+
+        for (int i = base; i < next; i++) {
+            if (slots[i].acked) continue;
+
+            long ms =
+                (now.tv_sec  - slots[i].sent.tv_sec ) * 1000 +
+                (now.tv_usec - slots[i].sent.tv_usec) / 1000;
+
+            if (ms > TIMEOUT_MS) {
+                sendto(sock, &packets[i], sizeof(DataPacket), 0,
+                       (struct sockaddr*)dest, sizeof(*dest));
+                gettimeofday(&slots[i].sent, NULL);
+            }
+        }
+    }
+    return 1;
+}
+
+
 int main(int argc, char *argv[])
 {
     // UPDATED ARGUMENT CHECK
