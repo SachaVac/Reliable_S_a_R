@@ -52,7 +52,7 @@ int send_packet_reliably(int sock, struct sockaddr_in *dest_addr, DataPacket *pc
         }
     }
 }
-
+/*
 int send_window_reliably(
     int sock,
     struct sockaddr_in *dest,
@@ -78,7 +78,7 @@ int send_window_reliably(
 
     while (base < packet_count) {
 
-        /* send new packets */
+        // send new packets 
         while (next < base + window_size && next < packet_count) {
             sendto(sock, &packets[next], sizeof(DataPacket), 0,
                    (struct sockaddr*)dest, sizeof(*dest));
@@ -86,7 +86,7 @@ int send_window_reliably(
             next++;
         }
 
-        /* wait for ACK */
+        // wait for ACK
         int r = recvfrom(sock, &ack, sizeof(ack), 0,
                          (struct sockaddr*)&from, &fromlen);
 
@@ -99,7 +99,7 @@ int send_window_reliably(
                 base++;
         }
 
-        /* retransmit on timeout */
+        // retransmit on timeout
         struct timeval now;
         gettimeofday(&now, NULL);
 
@@ -118,7 +118,7 @@ int send_window_reliably(
         }
     }
     return 1;
-}
+}*/
 
 
 int main(int argc, char *argv[])
@@ -194,6 +194,8 @@ int main(int argc, char *argv[])
 
     printf("Sending %s (%ld bytes) TO %s:%d\n", filename, filesize, ip, target_port);
 
+    //#ifdef STOP_AND_WAIT
+    // STOP AND WAIT SENDING
     DataPacket pckt;
     uint32_t cntr = 0;
 
@@ -220,7 +222,43 @@ int main(int argc, char *argv[])
         cntr++;
     }
     printf("\n");
+    /*
+    #else
+    // SLIDING WINDOW SENDING
+    DataPacket packets[MAX_PACKETS];
+    int pkt_cnt = 0;
 
+    // metadata 
+    packets[pkt_cnt].type = MSG_DATA;
+    packets[pkt_cnt].seq  = pkt_cnt;
+    packets[pkt_cnt].data_len =
+        snprintf((char*)packets[pkt_cnt].data, DATA_MAX_SIZE,
+                "FILENAME=%s;SIZE=%ld", filename, filesize) + 1;
+    pkt_cnt++;
+
+    // file data 
+    while ((bytes_sz = fread(packets[pkt_cnt].data, 1, DATA_MAX_SIZE, f)) > 0) {
+        packets[pkt_cnt].type = MSG_DATA;
+        packets[pkt_cnt].seq  = pkt_cnt;
+        packets[pkt_cnt].data_len = bytes_sz;
+        pkt_cnt++;
+        for (int i = 0; i < pkt_cnt; i++)
+    }
+
+    // calculate CRCs for metadata
+    for (int i = 0; i < pkt_cnt; i++)
+        packets[i].crc32 = crc32_compute(packets[i].data,
+                                     packets[i].data_len);
+
+    send_window_reliably(
+        sock,
+        &dest_addr,
+        packets,
+        pkt_cnt,
+        WINDOW_SIZE
+    );
+    #endif
+    */
     // Send Hash
     pckt.type = MSG_HASH;
     pckt.seq = cntr;

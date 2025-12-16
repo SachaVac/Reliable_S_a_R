@@ -21,8 +21,10 @@ void send_ack(int sock, struct sockaddr_in *target, uint32_t seq, int reply_port
 
     // FORCE the destination port for the ACK
     // This overwrites the port derived from the incoming packet
-    //target->sin_port = htons(reply_port); 
-    
+    #ifdef LOCAL
+    target->sin_port = htons(reply_port); 
+    #endif
+
     sendto(sock, &ack, sizeof(ack), 0, (struct sockaddr*)target, sizeof(*target));
 }
 
@@ -36,6 +38,7 @@ int main(int argc, char *argv[]) {
 
     int local_port = atoi(argv[1]);
     int reply_port = atoi(argv[2]);
+    //int reply_addr = atoi(argv[3]);
 
     if (local_port <= 0 || reply_port <= 0) {
         printf("Error: Ports must be positive integers.\n");
@@ -81,7 +84,7 @@ int main(int argc, char *argv[]) {
         int r = recvfrom(sock, &pckt, sizeof(pckt), 0, (struct sockaddr*)&sender_addr, &addr_len);
         if (r < 0) {
             // Optional: Print error if it's not just a timeout
-            // perror("recvfrom error");
+            perror("recvfrom error");
             continue;
         }
 

@@ -4,6 +4,8 @@
 
 #include <stdint.h>
 
+//#define LOCAL
+
 #define PACKET_MAX_SIZE 1024
 #define DATA_MAX_SIZE   (PACKET_MAX_SIZE - 10) // BUFFER_LEN
 

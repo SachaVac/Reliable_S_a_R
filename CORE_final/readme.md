@@ -26,3 +26,5 @@ gcc receiver.c crc32.c sha256.c -lssl -lcrypto -o receiver
   }
 }
 
+# read the port data raw
+sudo tcpdump -i lo udp port 7777 -vv

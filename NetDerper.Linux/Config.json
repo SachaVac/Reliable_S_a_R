@@ -1,12 +1,12 @@
 {
   "Data": {
-    "Connection": { "SourcePort": 5555, "TargetPort": 5556, "TargetHostName":"192.168.238.159"},
+    "Connection": { "SourcePort": 5556, "TargetPort": 5555, "TargetHostName":"127.0.0.1"},
     "Manipulation": { "DropRate": 5, "ErrorRate": 5 },
     "Delay": { "Mean": 0, "StdDev": 0 }
   },
   "Acknowledgement": {
-    "Connection": { "SourcePort": 7776, "TargetPort": 7777, "TargetHostName": "192.168.238.159"},
-    "Manipulation": { "DropRate": 5, "ErrorRate": 5 },
+    "Connection": { "SourcePort": 7777, "TargetPort": 7776, "TargetHostName": "127.0.0.1"},
+    "Manipulation": { "DropRate": 0, "ErrorRate": 0 },
     "Delay": { "Mean": 0, "StdDev": 0 }
   }
 }
