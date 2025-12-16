@@ -2,7 +2,7 @@
 #ifndef PROTOCOL_H
 #define PROTOCOL_H
 
-#define STOP_AND_WAIT
+//#define STOP_AND_WAIT
 
 #include <stdint.h>
 
