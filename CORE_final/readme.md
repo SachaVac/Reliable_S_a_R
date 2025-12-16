@@ -6,7 +6,7 @@ gcc receiver.c crc32.c sha256.c -lssl -lcrypto -o receiver
 
 
 # run sender
-./sender 172.0.0.1 5555 7777 test.jpg
+./sender 172.0.0.1 7777 5555 test.jpg
 ./sender 192.168.238.159 5555 7777 test.jpg
 
 # run receiver

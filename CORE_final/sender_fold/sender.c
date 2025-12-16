@@ -52,7 +52,7 @@ int send_packet_reliably(int sock, struct sockaddr_in *dest_addr, DataPacket *pc
         }
     }
 }
-/*
+
 int send_window_reliably(
     int sock,
     struct sockaddr_in *dest,
@@ -118,7 +118,7 @@ int send_window_reliably(
         }
     }
     return 1;
-}*/
+}
 
 
 int main(int argc, char *argv[])
@@ -194,7 +194,11 @@ int main(int argc, char *argv[])
 
     printf("Sending %s (%ld bytes) TO %s:%d\n", filename, filesize, ip, target_port);
 
-    //#ifdef STOP_AND_WAIT
+    
+    // Send File Data
+    size_t bytes_sz;
+    #ifdef STOP_AND_WAIT
+
     // STOP AND WAIT SENDING
     DataPacket pckt;
     uint32_t cntr = 0;
@@ -208,8 +212,7 @@ int main(int argc, char *argv[])
     send_packet_reliably(sock, &dest_addr, &pckt);
     cntr++;
 
-    // Send File Data
-    size_t bytes_sz;
+
     while ((bytes_sz = fread(pckt.data, 1, DATA_MAX_SIZE, f)) > 0) {
         pckt.type = MSG_DATA;
         pckt.seq = cntr;
@@ -222,7 +225,7 @@ int main(int argc, char *argv[])
         cntr++;
     }
     printf("\n");
-    /*
+    
     #else
     // SLIDING WINDOW SENDING
     DataPacket packets[MAX_PACKETS];
@@ -242,8 +245,8 @@ int main(int argc, char *argv[])
         packets[pkt_cnt].seq  = pkt_cnt;
         packets[pkt_cnt].data_len = bytes_sz;
         pkt_cnt++;
-        for (int i = 0; i < pkt_cnt; i++)
     }
+
 
     // calculate CRCs for metadata
     for (int i = 0; i < pkt_cnt; i++)
@@ -258,7 +261,7 @@ int main(int argc, char *argv[])
         WINDOW_SIZE
     );
     #endif
-    */
+    
     // Send Hash
     pckt.type = MSG_HASH;
     pckt.seq = cntr;
