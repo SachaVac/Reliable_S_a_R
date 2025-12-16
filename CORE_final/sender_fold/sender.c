@@ -83,6 +83,7 @@ int send_window_reliably(
         
         // 1. Send new packets (Fill the window)
         while (next_seq < base + window_size && next_seq < packet_count) {
+            printf("Sending packet SEQ %d\n", packets[next_seq].seq);
             sendto(sock, &packets[next_seq], sizeof(DataPacket), 0,
                    (struct sockaddr*)dest, sizeof(*dest));
             
@@ -115,6 +116,7 @@ int send_window_reliably(
             // Received an ACK, process it (GBN Logic)
             if (r == sizeof(AckPacket) && ack.type == MSG_ACK) {
                 // FIX: Assume ACK.seq is the next sequence number the receiver is waiting for.
+                printf("ACK sequence %u received.\n", ack.seq);
                 int new_base = ack.seq; 
                 //printf("Received ACK for SEQ %d\n", new_base);
                 // Only accept ACKs that advance the window (must be > base)
@@ -129,19 +131,9 @@ int send_window_reliably(
                         gettimeofday(&slots[base].sent, NULL);
                     }
                 }
-                // Příklad: Doplnění bloku pro řešení duplicitních ACK (kde new_base <= base)
-                else if (new_base <= base && base < packet_count) {
-                    // ACK potvrdil již potvrzené, ale Receiver nám říká, že něco chybí.
-                    // Znovu odešleme 'base' paket, abychom se pokusili prolomit zaseknutí.
-                    printf("Duplicate/Stale ACK for SEQ %d received. Resending base packet %d.\n", new_base, base);
-
-                    sendto(sock, &packets[base], sizeof(DataPacket), 0,
-                        (struct sockaddr*)dest, sizeof(*dest));
-                        
-                    gettimeofday(&slots[base].sent, NULL); // Restart časovače
+                
             }
-
-            }
+            
             
 
         } // End of ACK polling loop
