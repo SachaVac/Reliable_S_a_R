@@ -116,7 +116,7 @@ int send_window_reliably(
             if (r == sizeof(AckPacket) && ack.type == MSG_ACK) {
                 // FIX: Assume ACK.seq is the next sequence number the receiver is waiting for.
                 int new_base = ack.seq; 
-                
+                //printf("Received ACK for SEQ %d\n", new_base);
                 // Only accept ACKs that advance the window (must be > base)
                 if (new_base > base && new_base <= next_seq) {
                     
@@ -129,7 +129,21 @@ int send_window_reliably(
                         gettimeofday(&slots[base].sent, NULL);
                     }
                 }
+                // Příklad: Doplnění bloku pro řešení duplicitních ACK (kde new_base <= base)
+                else if (new_base <= base && base < packet_count) {
+                    // ACK potvrdil již potvrzené, ale Receiver nám říká, že něco chybí.
+                    // Znovu odešleme 'base' paket, abychom se pokusili prolomit zaseknutí.
+                    printf("Duplicate/Stale ACK for SEQ %d received. Resending base packet %d.\n", new_base, base);
+
+                    sendto(sock, &packets[base], sizeof(DataPacket), 0,
+                        (struct sockaddr*)dest, sizeof(*dest));
+                        
+                    gettimeofday(&slots[base].sent, NULL); // Restart časovače
             }
+
+            }
+            
+
         } // End of ACK polling loop
 
         // 3. Check for Timeout (Only the packet at 'base' needs a timer check in GBN)
