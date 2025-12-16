@@ -13,6 +13,8 @@
 
 #define TIMEOUT_MS 200
 
+uint16_t WINDOW_SIZE;
+
 // Function for reliable sending (No changes needed here)
 int send_packet_reliably(int sock, struct sockaddr_in *dest_addr, DataPacket *pckt) {
     pckt->crc32 = crc32_compute(pckt->data, pckt->data_len);
@@ -60,17 +62,12 @@ int send_window_reliably(
     int window_size
 ) 
 {
-    int base = 0;       // Sequence number of the first unACKed packet in the window
-    int next_seq = 0;   // Sequence number to send next (upper boundary of the window)
+    // 'base' je sekvenční číslo prvního nepotvrzeného paketu.
+    // Pohybuje se pouze tehdy, když je POTVRZEN paket 'base'.
+    int base = 0;      
+    int next_seq = 0;  // Sekvenční číslo paketu k odeslání
 
-    // A single timer for the packet at 'base' is sufficient for GBN.
-    // However, since we are reusing the Slot structure, we will use 'sent' to track 
-    // the time the current 'base' packet was last sent.
-    typedef struct {
-        int acked;      // Not strictly needed for GBN, but kept for consistency
-        struct timeval sent; 
-    } Slot;
-
+    // Slot pro každý paket pro sledování ACK a časovače
     Slot slots[packet_count];
     memset(slots, 0, sizeof(slots));
 
@@ -82,82 +79,85 @@ int send_window_reliably(
     while (base < packet_count) {
         
         // 1. Send new packets (Fill the window)
+        // Posíláme, dokud není okno plné nebo nejsou odeslány všechny pakety
         while (next_seq < base + window_size && next_seq < packet_count) {
             printf("Sending packet SEQ %d\n", packets[next_seq].seq);
+            
             sendto(sock, &packets[next_seq], sizeof(DataPacket), 0,
                    (struct sockaddr*)dest, sizeof(*dest));
             
-            // Start the timer for the packet at 'base' when it's first sent.
-            if (base == next_seq) {
-                 gettimeofday(&slots[base].sent, NULL);
-                 // Optional: printf("Timer started for SEQ %d\n", base);
-            }
+            // Spustíme časovač pro KAŽDÝ odeslaný paket
+            gettimeofday(&slots[next_seq].sent, NULL);
+            slots[next_seq].acked = 0; // Nastavíme jako nepotvrzený
             
-            // Optional: printf("Sent packet: %d\n", packets[next_seq].seq);
             next_seq++;
         }
 
-        // 2. Poll for ALL waiting ACKs
-        // Loop continuously to drain the socket buffer until timeout is hit.
+        // 2. Poll for ALL waiting ACKs (Zpracování ACKs)
+        // ACKs v SR NEJSOU kumulativní. Každý ACK potvrzuje POUZE sekvenci ack.seq.
         while (1) {
             int r = recvfrom(sock, &ack, sizeof(ack), 0,
                              (struct sockaddr*)&from, &fromlen);
 
             if (r < 0) {
                 if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                    // Timeout occurred, break out of the polling loop
-                    break; 
+                    break; // Timeout pro recvfrom, kontrolujeme časovače
                 } else {
                     perror("Socket error during ACK reception");
-                    return 0; // Fatal error
+                    return 0; // Fatální chyba
                 }
             }
             
-            // Received an ACK, process it (GBN Logic)
             if (r == sizeof(AckPacket) && ack.type == MSG_ACK) {
-                // FIX: Assume ACK.seq is the next sequence number the receiver is waiting for.
-                printf("ACK sequence %u received.\n", ack.seq);
-                int new_base = ack.seq; 
-                //printf("Received ACK for SEQ %d\n", new_base);
-                // Only accept ACKs that advance the window (must be > base)
-                if (new_base > base && new_base <= next_seq) {
-                    
-                    // Move the window base
-                    base = new_base; // FIX: Base is directly set to the ACK value (e.g., 2985)
-                    printf("ACK received. Window slid. New base: %d\n", base);
-
-                    // Reset the timer for the *new* base packet (which is the first unACKed one)
-                    if (base < packet_count) {
-                        gettimeofday(&slots[base].sent, NULL);
-                    }
-                }
+                uint32_t ack_seq = ack.seq; 
+                printf("ACK received for SEQ %u.\n", ack_seq);
                 
+                // Přijatý ACK musí být v rámci aktuálního okna [base, next_seq - 1]
+                if (ack_seq >= base && ack_seq < next_seq) {
+                    
+                    // Potvrdíme POUZE paket s daným sekvenčním číslem
+                    if (slots[ack_seq].acked == 0) {
+                        slots[ack_seq].acked = 1;
+                        printf("Packet SEQ %u confirmed (SR).\n", ack_seq);
+                        
+                        // Posun báze (base) - Pouze pokud se potvrdí stávající base!
+                        while (base < packet_count && slots[base].acked == 1) {
+                            base++;
+                            printf("Window slid. New base: %d\n", base);
+                        }
+                    } else {
+                        printf("Duplicate ACK for SEQ %u. Ignoring.\n", ack_seq);
+                    }
+                } 
+                // Ignorujeme ACK mimo okno nebo pro již odeslané pakety.
             }
-            
-            
 
         } // End of ACK polling loop
 
-        // 3. Check for Timeout (Only the packet at 'base' needs a timer check in GBN)
+        // 3. Check for Timeout (Každý nepotvrzený paket v okně má vlastní časovač)
         struct timeval now;
         gettimeofday(&now, NULL);
 
-        if (base < packet_count) {
-            long ms =
-                (now.tv_sec - slots[base].sent.tv_sec ) * 1000 +
-                (now.tv_usec - slots[base].sent.tv_usec) / 1000;
+        // Procházíme celé okno od 'base' až po 'next_seq'
+        for (int i = base; i < next_seq; i++) {
+            
+            // Kontrolujeme pouze nepotvrzené pakety
+            if (slots[i].acked == 0) {
+                long ms =
+                    (now.tv_sec - slots[i].sent.tv_sec ) * 1000 +
+                    (now.tv_usec - slots[i].sent.tv_usec) / 1000;
 
-            if (ms > TIMEOUT_MS) {
-                // GBN Retransmission: Retransmit ALL packets starting from 'base'
-                printf("Timeout (SEQ %u). Retransmitting window from %d...\n", packets[base].seq, base);
-                
-                // Restart timer for the 'base' packet
-                gettimeofday(&slots[base].sent, NULL);
-                
-                // Retransmit all unACKed packets in the current window
-                for (int i = base; i < next_seq; i++) {
+                if (ms > TIMEOUT_MS) {
+                    // SR Retransmission: Retransmituje se POUZE paket 'i'
+                    printf("Timeout (SEQ %u). Retransmitting ONLY packet %d...\n", packets[i].seq, i);
+                    
+                    // Restart časovače pro POUZE paket 'i'
+                    gettimeofday(&slots[i].sent, NULL);
+                    
+                    // Retransmituje se pouze tento jeden paket
                     sendto(sock, &packets[i], sizeof(DataPacket), 0,
                            (struct sockaddr*)dest, sizeof(*dest));
+                    
                 }
             }
         }
@@ -168,9 +168,9 @@ int send_window_reliably(
 int main(int argc, char *argv[])
 {
     // UPDATED ARGUMENT CHECK
-    if (argc != 5) {
-        printf("Usage: %s <Target_IP> <Target_Port> <Local_Port> <File>\n", argv[0]);
-        printf("Example: %s 127.0.0.1 15000 60490 test.bin\n", argv[0]);
+    if (argc != 6) {
+        printf("Usage: %s <Target_IP> <Target_Port> <Local_Port> <File> <WINDOW_SIZE>\n", argv[0]);
+        printf("Example: %s 127.0.0.1 5555 7777 test.bin 128\n", argv[0]);
         return 1;
     }
 
@@ -178,6 +178,7 @@ int main(int argc, char *argv[])
     int target_port = atoi(argv[2]); // Parse Target Port
     int local_port = atoi(argv[3]);  // Parse Local Port
     const char *filename = argv[4];
+    WINDOW_SIZE = (uint16_t)atoi(argv[5]); // Parse WINDOW_SIZE
 
     if (target_port <= 0 || local_port <= 0) {
         printf("Error: Ports must be positive integers.\n");

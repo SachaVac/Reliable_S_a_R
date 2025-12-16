@@ -49,4 +49,13 @@ typedef struct {
     uint32_t crc32;      // CRC celého data pole
 } AckPacket;
 
+
+#define MAX_RECV_BUFFER 1024 // Ponecháno z původního kódu, ale SR ho využije
+
+// Struktura pro uložení paketu v přijímacím bufferu
+typedef struct {
+    DataPacket packet;
+    int received; // 1, pokud byl paket přijat a uložen v bufferu
+} RecvSlot;
+
 #endif

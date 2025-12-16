@@ -10,7 +10,7 @@
 #define DATA_MAX_SIZE   (PACKET_MAX_SIZE - 10) // BUFFER_LEN
 
 // window config
-#define WINDOW_SIZE  8
+
 #define MAX_PACKETS  1024
 
 #ifdef SENDER
@@ -54,16 +54,20 @@ typedef struct {
 
 
 // --------- window structure (for queue) -------------
-typedef struct {
+/*typedef struct {
     DataPacket pkt;
     int acked;
     struct timeval sent_time;
-} WindowSlot;
+} WindowSlot;*/
 
-uint32_t base = 0;      // nejstarší nepotvrzený seq
-uint32_t next_seq = 0; // další seq k odeslání
-WindowSlot window[WINDOW_SIZE];
+//uint32_t base = 0;      // nejstarší nepotvrzený seq
+//uint32_t next_seq = 0; // další seq k odeslání
+//WindowSlot window[WINDOW_SIZE];
 
 
-
+// Struktura Slot je rozšířena, aby sledovala, zda byl paket potvrzen.
+typedef struct {
+    int acked;      // 1, pokud byl paket potvrzen; 0, pokud ne
+    struct timeval sent; // Čas odeslání/retransmise (časovač pro KAŽDÝ paket)
+} Slot;
 #endif
