@@ -36,6 +36,7 @@ void send_ack(int sock, struct sockaddr_in *target, uint32_t seq, int reply_port
 
 // Function to handle continuous receiving of packets using GBN logic
 // It returns 1 on successful hash receipt, 0 otherwise.
+// receiver.c - Nová funkce pro zpracování GBN přenosu
 int receive_window_packets(
     int sock,
     int reply_port,
@@ -50,50 +51,33 @@ int receive_window_packets(
     socklen_t addr_len = sizeof(sender_addr); 
     DataPacket pckt;
     
-    // We only need a variable for the sender's address, as the GBN receiver 
-    // doesn't buffer data; it only buffers the expected sequence number.
-
-    printf("\n--- Starting Window Receive Loop (Go-Back-N Logic) ---\n");
+    printf("\n--- Start GBN Receive Loop (Expected SEQ: 0) ---\n");
 
     while (1) {
-        // Receive data
+        // 1. Příjem dat
         int r = recvfrom(sock, &pckt, sizeof(DataPacket), 0, (struct sockaddr*)&sender_addr, &addr_len);
         
         if (r < 0) {
-            // Note: A real receiver loop should handle timeouts to signal the application layer
-            // but for a simple server, we assume the sender will keep retransmitting.
+            // Tady by mělo být ošetření timeoutu, ale pro jednoduchost jen pokračujeme
             continue; 
         }
 
-        // 1. CRC Check
+        // 2. Kontrola CRC
         uint32_t computed_crc = crc32_compute(pckt.data, pckt.data_len);
         if (computed_crc != pckt.crc32) {
             printf("CRC Mismatch on SEQ %u. Dropping packet.\n", pckt.seq);
-            // DO NOT ACK - CRC failure means the packet is unusable.
+            // NEPOSÍLÁME ACK – zahození způsobí retransmisi od odesílatele
             continue;
         }
 
-        // 2. Hash Packet (End of Transfer)
-        if (pckt.type == MSG_HASH) {
-            if (*f_ptr) fclose(*f_ptr); // Close file handle
-            *f_ptr = NULL;
+        // 3. Zpracování paketu (GBN Logic)
+        
+        if (pckt.seq == expected_seq) {
+            // A. Paket v pořadí (Correctly ordered packet received!)
             
-            printf("HASH packet (SEQ %u) received.\n", pckt.seq);
-            memcpy(received_hash, pckt.data, 32);
-            *hash_received_ptr = 1;
-            
-            // Send final ACK for the hash packet
-            send_ack(sock, &sender_addr, pckt.seq, reply_port);
-            return 1; // Transfer Complete
-        }
-
-        // 3. Data/Metadata Packet Handling (GBN Logic)
-        if (pckt.type == MSG_DATA) {
-            
-            if (pckt.seq == expected_seq) {
-                // Correctly ordered packet received! Process and advance.
-                
-                if (pckt.seq == 0) { // Metadata packet
+            // 3.1 Zpracování obsahu
+            if (pckt.type == MSG_DATA) {
+                if (pckt.seq == 0) { // Metadata paket
                     char *start = strstr((char*)pckt.data, "FILENAME=") + 9;
                     char *end = strchr(start, ';');
                     if (end) {
@@ -104,39 +88,60 @@ int receive_window_packets(
                         *f_ptr = fopen(output_filename, "wb");
                     }
                 } else {
-                    // Write data to file
+                    // Zápis dat do souboru
                     if (*f_ptr) fwrite(pckt.data, 1, pckt.data_len, *f_ptr);
                 }
+            }
+            
+            if (pckt.type == MSG_HASH) { // Hash Paket (Konec přenosu)
+                if (*f_ptr) fclose(*f_ptr);
+                *f_ptr = NULL;
+                
+                printf("HASH packet (SEQ %u) received.\n", pckt.seq);
+                memcpy(received_hash, pckt.data, 32);
+                *hash_received_ptr = 1;
 
-                // Advance the window base
+                // POSTUP GBN: Po zpracování se očekávané číslo sekvence ZVÝŠÍ
                 expected_seq++;
                 
-                // Send cumulative ACK (ACKs for the expected sequence number)
-                send_ack(sock, &sender_addr, pckt.seq, reply_port);
+                // POSTUP GBN: Odesíláme ACK s číslem NÁSLEDUJÍCÍHO očekávaného paketu (tj. expected_seq)
+                send_ack(sock, &sender_addr, expected_seq, reply_port);
+                printf("Sent final ACK for hash. Expected next: %u\n", expected_seq);
+                return 1; // Ukončení přenosu
+            }
+
+            // 3.2 Posun GBN okna (Pouze pro DATA/METADATA)
+            if (pckt.type == MSG_DATA) {
+                expected_seq++;
+                
+                // Odesíláme ACK s číslem NÁSLEDUJÍCÍHO očekávaného paketu
+                send_ack(sock, &sender_addr, expected_seq, reply_port);
                 printf("\rReceived & ACKed SEQ %u. Next expected: %u", pckt.seq, expected_seq);
                 fflush(stdout);
-                
-            } else if (pckt.seq < expected_seq) {
-                // Duplicate packet (already received and acknowledged)
-                // Re-send the ACK for this sequence number to handle lost ACKs.
-                send_ack(sock, &sender_addr, pckt.seq, reply_port);
-                printf("\nDuplicate SEQ %u received. Re-sending ACK.\n", pckt.seq);
-                
-            } else { // pckt.seq > expected_seq
-                // Out-of-order packet (Go-Back-N Discard)
-                printf("\nOut-of-order SEQ %u received (Expected %u). Dropping.\n", pckt.seq, expected_seq);
-                
-                // IMPORTANT: In GBN, the receiver must send a duplicate ACK for the 
-                // last *in-order* packet (expected_seq - 1) to inform the sender 
-                // which packet needs retransmission (the one at expected_seq).
-                if (expected_seq > 0) {
-                     send_ack(sock, &sender_addr, expected_seq - 1, reply_port);
-                     printf("Re-sending ACK for %u.\n", expected_seq - 1);
-                }
+            }
+            
+        } else if (pckt.seq < expected_seq) {
+            // B. Duplicitní paket (Duplicate packet)
+            // Re-send ACK pro poslední přijatý (expected_seq - 1), 
+            // aby se odesílatel ujistil, že jsme se posunuli.
+            if (expected_seq > 0) {
+                 send_ack(sock, &sender_addr, expected_seq, reply_port);
+                 printf("\nDuplicate SEQ %u received. Re-sending ACK for %u (Next expected).\n", pckt.seq, expected_seq);
+            }
+            
+        } else { // pckt.seq > expected_seq
+            // C. Paket mimo pořadí (Out-of-order packet - GBN Zahození)
+            printf("\nOut-of-order SEQ %u received (Expected %u). Dropping.\n", pckt.seq, expected_seq);
+            
+            // GBN: Znovu pošleme ACK pro NÁSLEDUJÍCÍ očekávané číslo, 
+            // abychom informovali odesílatele, že se nepohnul.
+            if (expected_seq > 0) {
+                 send_ack(sock, &sender_addr, expected_seq, reply_port);
+                 printf("Re-sending ACK for %u.\n", expected_seq);
             }
         }
     }
-    return 0; // Should not be reached
+    return 0; // Kód by neměl být dosažen
 }
 
 int main(int argc, char *argv[]) {
@@ -258,18 +263,19 @@ int main(int argc, char *argv[]) {
     #else
     // GO-BACK-N RECEIVING
     if (receive_window_packets(
-    sock,
-    reply_port,
-    &f, // Pass file pointer address
-    output_filename,
-    received_hash,
-    &hash_received
+        sock,
+        reply_port,
+        &f, // Pass file pointer address
+        output_filename,
+        received_hash,
+        &hash_received
     )) 
     {
         printf("\nFile transfer finished.\n");
     } else {
         printf("\nTransfer failed or ended prematurely.\n");
     }
+
     #endif
 
     if (f) fclose(f);

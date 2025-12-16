@@ -6,7 +6,7 @@
   },
   "Acknowledgement": {
     "Connection": { "SourcePort": 7777, "TargetPort": 7776, "TargetHostName": "127.0.0.1"},
-    "Manipulation": { "DropRate": 0, "ErrorRate": 0 },
+    "Manipulation": { "DropRate": 5, "ErrorRate": 5 },
     "Delay": { "Mean": 0, "StdDev": 0 }
   }
 }

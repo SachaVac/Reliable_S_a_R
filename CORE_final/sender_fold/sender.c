@@ -52,7 +52,6 @@ int send_packet_reliably(int sock, struct sockaddr_in *dest_addr, DataPacket *pc
         }
     }
 }
-
 int send_window_reliably(
     int sock,
     struct sockaddr_in *dest,
@@ -61,12 +60,15 @@ int send_window_reliably(
     int window_size
 ) 
 {
-    int base = 0;
-    int next = 0;
+    int base = 0;       // Sequence number of the first unACKed packet in the window
+    int next_seq = 0;   // Sequence number to send next (upper boundary of the window)
 
+    // A single timer for the packet at 'base' is sufficient for GBN.
+    // However, since we are reusing the Slot structure, we will use 'sent' to track 
+    // the time the current 'base' packet was last sent.
     typedef struct {
-        int acked;
-        struct timeval sent;
+        int acked;      // Not strictly needed for GBN, but kept for consistency
+        struct timeval sent; 
     } Slot;
 
     Slot slots[packet_count];
@@ -76,50 +78,86 @@ int send_window_reliably(
     socklen_t fromlen = sizeof(from);
     AckPacket ack;
 
+    // --- Sliding Window Main Loop ---
     while (base < packet_count) {
-
-        // send new packets 
-        while (next < base + window_size && next < packet_count) {
-            sendto(sock, &packets[next], sizeof(DataPacket), 0,
+        
+        // 1. Send new packets (Fill the window)
+        while (next_seq < base + window_size && next_seq < packet_count) {
+            sendto(sock, &packets[next_seq], sizeof(DataPacket), 0,
                    (struct sockaddr*)dest, sizeof(*dest));
-            gettimeofday(&slots[next].sent, NULL);
-            next++;
+            
+            // Start the timer for the packet at 'base' when it's first sent.
+            if (base == next_seq) {
+                 gettimeofday(&slots[base].sent, NULL);
+                 // Optional: printf("Timer started for SEQ %d\n", base);
+            }
+            
+            // Optional: printf("Sent packet: %d\n", packets[next_seq].seq);
+            next_seq++;
         }
 
-        // wait for ACK
-        int r = recvfrom(sock, &ack, sizeof(ack), 0,
-                         (struct sockaddr*)&from, &fromlen);
+        // 2. Poll for ALL waiting ACKs
+        // Loop continuously to drain the socket buffer until timeout is hit.
+        while (1) {
+            int r = recvfrom(sock, &ack, sizeof(ack), 0,
+                             (struct sockaddr*)&from, &fromlen);
 
-        if (r == sizeof(AckPacket) && ack.type == MSG_ACK) {
-            int s = ack.seq;
-            if (s >= 0 && s < packet_count)
-                slots[s].acked = 1;
+            if (r < 0) {
+                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    // Timeout occurred, break out of the polling loop
+                    break; 
+                } else {
+                    perror("Socket error during ACK reception");
+                    return 0; // Fatal error
+                }
+            }
+            
+            // Received an ACK, process it (GBN Logic)
+            if (r == sizeof(AckPacket) && ack.type == MSG_ACK) {
+                // FIX: Assume ACK.seq is the next sequence number the receiver is waiting for.
+                int new_base = ack.seq; 
+                
+                // Only accept ACKs that advance the window (must be > base)
+                if (new_base > base && new_base <= next_seq) {
+                    
+                    // Move the window base
+                    base = new_base; // FIX: Base is directly set to the ACK value (e.g., 2985)
+                    printf("ACK received. Window slid. New base: %d\n", base);
 
-            while (base < packet_count && slots[base].acked)
-                base++;
-        }
+                    // Reset the timer for the *new* base packet (which is the first unACKed one)
+                    if (base < packet_count) {
+                        gettimeofday(&slots[base].sent, NULL);
+                    }
+                }
+            }
+        } // End of ACK polling loop
 
-        // retransmit on timeout
+        // 3. Check for Timeout (Only the packet at 'base' needs a timer check in GBN)
         struct timeval now;
         gettimeofday(&now, NULL);
 
-        for (int i = base; i < next; i++) {
-            if (slots[i].acked) continue;
-
+        if (base < packet_count) {
             long ms =
-                (now.tv_sec  - slots[i].sent.tv_sec ) * 1000 +
-                (now.tv_usec - slots[i].sent.tv_usec) / 1000;
+                (now.tv_sec - slots[base].sent.tv_sec ) * 1000 +
+                (now.tv_usec - slots[base].sent.tv_usec) / 1000;
 
             if (ms > TIMEOUT_MS) {
-                sendto(sock, &packets[i], sizeof(DataPacket), 0,
-                       (struct sockaddr*)dest, sizeof(*dest));
-                gettimeofday(&slots[i].sent, NULL);
+                // GBN Retransmission: Retransmit ALL packets starting from 'base'
+                printf("Timeout (SEQ %u). Retransmitting window from %d...\n", packets[base].seq, base);
+                
+                // Restart timer for the 'base' packet
+                gettimeofday(&slots[base].sent, NULL);
+                
+                // Retransmit all unACKed packets in the current window
+                for (int i = base; i < next_seq; i++) {
+                    sendto(sock, &packets[i], sizeof(DataPacket), 0,
+                           (struct sockaddr*)dest, sizeof(*dest));
+                }
             }
         }
     }
     return 1;
 }
-
 
 int main(int argc, char *argv[])
 {
@@ -197,11 +235,12 @@ int main(int argc, char *argv[])
     
     // Send File Data
     size_t bytes_sz;
-    #ifdef STOP_AND_WAIT
 
+    
     // STOP AND WAIT SENDING
     DataPacket pckt;
     uint32_t cntr = 0;
+    #ifdef STOP_AND_WAIT
 
     // Send Metadata
     pckt.type = MSG_DATA;
@@ -210,6 +249,7 @@ int main(int argc, char *argv[])
     pckt.data_len = strlen((char*)pckt.data) + 1;
 
     send_packet_reliably(sock, &dest_addr, &pckt);
+
     cntr++;
 
 
@@ -225,11 +265,31 @@ int main(int argc, char *argv[])
         cntr++;
     }
     printf("\n");
+
+    // Send Hash
+    pckt.type = MSG_HASH;
+    pckt.seq = cntr;
+    memcpy(pckt.data, file_hash, 32);
+    pckt.data_len = 32;
+
+    printf("Sending HASH...\n");
+    send_packet_reliably(sock, &dest_addr, &pckt);
     
     #else
     // SLIDING WINDOW SENDING
-    DataPacket packets[MAX_PACKETS];
+    DataPacket *packets = NULL; // Pointer to the dynamically allocated array
     int pkt_cnt = 0;
+
+    long num_data_packets_needed = (filesize + DATA_MAX_SIZE - 1) / DATA_MAX_SIZE;
+    int total_packets_needed = (int)num_data_packets_needed + 1;
+
+    packets = (DataPacket *)malloc(total_packets_needed * sizeof(DataPacket));
+    if (packets == NULL) {
+        perror("Failed to allocate memory for packets");
+        fclose(f);
+        close(sock);
+        return 1;
+    }
 
     // metadata 
     packets[pkt_cnt].type = MSG_DATA;
@@ -241,11 +301,19 @@ int main(int argc, char *argv[])
 
     // file data 
     while ((bytes_sz = fread(packets[pkt_cnt].data, 1, DATA_MAX_SIZE, f)) > 0) {
+        
         packets[pkt_cnt].type = MSG_DATA;
         packets[pkt_cnt].seq  = pkt_cnt;
         packets[pkt_cnt].data_len = bytes_sz;
         pkt_cnt++;
     }
+
+    // Send Hash
+    packets[pkt_cnt].type = MSG_HASH;
+    packets[pkt_cnt].seq  = pkt_cnt;
+    memcpy(packets[pkt_cnt].data, file_hash, 32);
+    packets[pkt_cnt].data_len = 32;
+    pkt_cnt++;
 
 
     // calculate CRCs for metadata
@@ -260,16 +328,9 @@ int main(int argc, char *argv[])
         pkt_cnt,
         WINDOW_SIZE
     );
-    #endif
-    
-    // Send Hash
-    pckt.type = MSG_HASH;
-    pckt.seq = cntr;
-    memcpy(pckt.data, file_hash, 32);
-    pckt.data_len = 32;
 
-    printf("Sending HASH...\n");
-    send_packet_reliably(sock, &dest_addr, &pckt);
+    free(packets);
+    #endif
 
     printf("ALLDONE\n");
     fclose(f);

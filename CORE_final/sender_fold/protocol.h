@@ -10,7 +10,7 @@
 #define DATA_MAX_SIZE   (PACKET_MAX_SIZE - 10) // BUFFER_LEN
 
 // window config
-#define WINDOW_SIZE  8   // snadno měnitelné
+#define WINDOW_SIZE  32   // snadno měnitelné
 #define MAX_PACKETS  1024
 
 #ifdef SENDER
