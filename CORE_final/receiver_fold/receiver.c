@@ -21,7 +21,7 @@ void send_ack(int sock, struct sockaddr_in *target, uint32_t seq, int reply_port
 
     // FORCE the destination port for the ACK
     // This overwrites the port derived from the incoming packet
-    target->sin_port = htons(reply_port); 
+    //target->sin_port = htons(reply_port); 
     
     sendto(sock, &ack, sizeof(ack), 0, (struct sockaddr*)target, sizeof(*target));
 }
